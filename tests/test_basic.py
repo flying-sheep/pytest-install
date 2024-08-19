@@ -1,7 +1,6 @@
-import json
-from subprocess import CalledProcessError, run
-import venv
-from collections.abc import Mapping
+from subprocess import run
+import sys
+from collections.abc import Generator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
@@ -32,21 +31,16 @@ def build(
         return builder.build(dist_type, dest_path, config_settings)
 
 
-def install(wheel_path: Path, interpreter: Path):
+def install(wheel_path: Path):
+    import sysconfig
+
     from installer import install
     from installer.destinations import SchemeDictionaryDestination
     from installer.sources import WheelFile
 
-    try:
-        out = run([interpreter, "-c", "import json; import sysconfig; print(json.dumps(sysconfig.get_paths()))"], capture_output=True, check=True).stdout
-    except CalledProcessError as e:
-        e.add_note(e.stderr.decode("utf-8"))
-        raise
-    scheme_dict = json.loads(out)
-
     destination = SchemeDictionaryDestination(
-        scheme_dict,
-        interpreter=interpreter,
+        sysconfig.get_paths(),
+        interpreter=sys.executable,
         script_kind="posix",
     )
 
@@ -59,14 +53,25 @@ def install(wheel_path: Path, interpreter: Path):
 
 
 @pytest.fixture()
-def env(tmp_path) -> Path:
+def test_pkg(tmp_path) -> Generator[str, None, None]:
     (dist_path := tmp_path / "dist").mkdir()
-    (env_path := tmp_path / "env").mkdir()
     wheel_path = build(DATA_DIR / "test-pkg", dist_path)
-    venv.EnvBuilder(symlinks=True).create(env_path)
-    install(wheel_path, env_path / "bin/python")
-    return env_path
+    install(wheel_path)
+    yield
+    run(
+        ["uv", "pip", "uninstall", f"--python={sys.executable}", "test-pkg"], check=True
+    )
+    del sys.modules["test_pkg"]
 
 
-def test_basic(env):
-    print(env)
+def test_basic(test_pkg):
+    import test_pkg as _
+
+    from importlib.metadata import version
+
+    assert version("test_pkg") == "0.0.1"
+
+
+def test_inverse():
+    with pytest.raises(ImportError):
+        import test_pkg
