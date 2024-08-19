@@ -1,0 +1,7 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[project]
+name = "test-pkg"
+version = "0.0.1"
